@@ -9,7 +9,7 @@ tags: math, web
 
 ### Updated on 02/21/2013
 
-With the release of Letterpress 0.0.2 I can have fun with math easily. Simply attaching a “math” tag gains me the power of math: $E=m*c^2$.
+With the release of Letterpress 0.0.2 I can have fun with math easily. Simply attaching a “math” tag gains me the power of math: $E=m*c^2$. $\dot{x} = \frac{\dx}{\dt}$.
 
 ---
 

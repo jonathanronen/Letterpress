@@ -446,9 +446,12 @@ def main():
                                   action="store_const", const=logging.DEBUG,
                                   help="more verbose output")
         parser.add_argument("--version", action="version", version=version)
+        parser.add_argument("--no-loop", help="build site once, do not monitor for changes.", action="store_true")
         parser.set_defaults(log_level=logging.INFO)
         options = parser.parse_args()
+
         published_dir = options.published_dir
+        no_loop       = options.no_loop
     else:
         usage = " %prog PUBLISHED_DIR"
         version = "%prog " + __version__
@@ -720,149 +723,150 @@ def main():
 
     build_site()
 
-    # Continuous posts monitoring and site building.
-    class ResourceChangeHandler(pyinotify.PrintAllEvents):
-        def process_default(self, event):
-            if event.name.startswith(log_file):
-                return
-            # super(ResourceChangeHandler, self).process_default(event)
-            file_create_mask = pyinotify.IN_CLOSE_WRITE | pyinotify.IN_MOVED_TO
-            dir_create_mask = pyinotify.IN_CREATE | pyinotify.IN_MOVED_TO
-            delete_mask = pyinotify.IN_DELETE | pyinotify.IN_MOVED_FROM
-            path = os.path.normpath(event.path)
-            if path == published_dir:
-                if not event.dir:
-                    if os.path.basename(event.pathname) == 'letterpress.config':
-                        # Configure file changed. Rebuild the whole site.
-                        if event.mask & file_create_mask:
-                            logger.info('New site configure')
-                            build_site()
-                        return
-                    elif os.path.splitext(event.pathname)[1] == config['markdown_ext']:
-                        if event.mask & file_create_mask:
-                            # New post or post changed.
-                            post = create_post(event.pathname)
-                            if not post:
-                                return
-                            if post.file_path in posts:
-                                logger.info('Update post: %s', os.path.basename(event.pathname))
-                            else:
-                                logger.info('New post: %s', os.path.basename(event.pathname))
-                            posts[post.file_path] = post
-                            create_tags(posts)
-                            create_timeline_archives(posts)
-                            create_monthly_archives(posts)
-                            create_yearly_archives(monthly_archives)
-                            create_complete_archive(monthly_archives)
-                        elif event.mask & delete_mask:
-                            # Delete post.
-                            logger.info('Delete post: %s', os.path.basename(event.pathname))
-                            post = posts.pop(event.pathname, None)
-                            if post:
-                                dst = os.path.join(site_dir, post.path)
-                                if os.path.exists(dst):
-                                    try:
-                                        os.remove(dst)
-                                    except:
-                                        logger.exception('Can not delete %s', dst)
-                                for tag_name in post.tags:
-                                    tag = tags.get(tag_name)
-                                    if tag:
-                                        try:
-                                            tag.posts.remove(post)
-                                        except:
-                                            pass
-                                        if not tag.posts:
-                                            # The tag is empty now. Remove it.
-                                            tags.pop(tag_name, None)
-                                            dst = os.path.join(site_dir, tag.path)
-                                            if os.path.exists(dst):
-                                                shutil.rmtree(dst, ignore_errors=True)
-                                if len(posts) % 5 == 0 and len(timeline_archives) > 1:
-                                    # Last timeline archive is empty. Remove it.
-                                    last_timeline_archive = timeline_archives.pop()
-                                    dst = os.path.join(site_dir, last_timeline_archive.path)
-                                    if os.path.exists(dst):
-                                        shutil.rmtree(dst, ignore_errors=True)
-
-                                monthly_archive = monthly_archives.get(datetime.date(post.date.year, post.date.month, 1))
-                                if monthly_archive:
-                                    try:
-                                        monthly_archive.posts.remove(post)
-                                    except:
-                                        pass
-                                    if not monthly_archive.posts:
-                                        # The month is empty now. Remove it.
-                                        monthly_archives.pop(monthly_archive.month, None)
-                                        dst = os.path.join(site_dir, monthly_archive.path)
-                                        if os.path.exists(dst):
-                                            shutil.rmtree(dst, ignore_errors=True)
-                                        yearly_archive = yearly_archives.get(datetime.date(monthly_archive.month.year, 1, 1))
-                                        if yearly_archive:
-                                            try:
-                                                yearly_archive.monthly_archives.remove(monthly_archive)
-                                            except:
-                                                pass
-                                            if not yearly_archive.monthly_archives:
-                                                # The year is empty now. Remove it.
-                                                yearly_archives.pop(yearly_archive.year, None)
-                                                dst = os.path.join(site_dir, yearly_archive.path)
-                                                if os.path.exists(dst):
-                                                    shutil.rmtree(dst, ignore_errors=True)
-
+    if not no_loop:
+        # Continuous posts monitoring and site building.
+        class ResourceChangeHandler(pyinotify.PrintAllEvents):
+            def process_default(self, event):
+                if event.name.startswith(log_file):
+                    return
+                # super(ResourceChangeHandler, self).process_default(event)
+                file_create_mask = pyinotify.IN_CLOSE_WRITE | pyinotify.IN_MOVED_TO
+                dir_create_mask = pyinotify.IN_CREATE | pyinotify.IN_MOVED_TO
+                delete_mask = pyinotify.IN_DELETE | pyinotify.IN_MOVED_FROM
+                path = os.path.normpath(event.path)
+                if path == published_dir:
+                    if not event.dir:
+                        if os.path.basename(event.pathname) == 'letterpress.config':
+                            # Configure file changed. Rebuild the whole site.
+                            if event.mask & file_create_mask:
+                                logger.info('New site configure')
+                                build_site()
+                            return
+                        elif os.path.splitext(event.pathname)[1] == config['markdown_ext']:
+                            if event.mask & file_create_mask:
+                                # New post or post changed.
+                                post = create_post(event.pathname)
+                                if not post:
+                                    return
+                                if post.file_path in posts:
+                                    logger.info('Update post: %s', os.path.basename(event.pathname))
+                                else:
+                                    logger.info('New post: %s', os.path.basename(event.pathname))
+                                posts[post.file_path] = post
                                 create_tags(posts)
                                 create_timeline_archives(posts)
                                 create_monthly_archives(posts)
                                 create_yearly_archives(monthly_archives)
                                 create_complete_archive(monthly_archives)
-                        return
-            elif path == templates_dir:
-                # Template changed. Rebuild the whole site.
-                if event.mask & file_create_mask and os.path.splitext(event.pathname)[1] == '.html':
-                    logger.info('Update template: %s', os.path.basename(event.pathname))
-                    build_site()
-                return
-            # Map other resource changes into site dir.
-            if site_dir == published_dir:
-                return
-            if os.path.basename(event.pathname).startswith('.'):
-                # Ignore hidden/temp files
-                return
-            rel_path = os.path.relpath(event.pathname, published_dir)
-            dst = os.path.join(site_dir, rel_path)
-            if event.dir:
-                if event.mask & dir_create_mask:
-                    logger.info('New resource dir: %s', rel_path)
-                    if os.path.exists(dst):
-                        shutil.rmtree(dst, ignore_errors=True)
-                    try:
-                        shutil.copytree(event.pathname, dst)
-                    except Exception as e:
-                        logger.error(e)
-                elif event.mask & delete_mask:
-                    logger.info('Delete resource dir: %s', rel_path)
-                    if os.path.exists(dst):
-                        shutil.rmtree(dst, ignore_errors=True)
-            else:
-                if event.mask & file_create_mask:
-                    logger.info('New resource file: %s', rel_path)
-                    try:
-                        shutil.copyfile(event.pathname, dst)
-                    except Exception as e:
-                        logger.error(e)
-                elif event.mask & delete_mask:
-                    logger.info('Delete resource file: %s', rel_path)
-                    if os.path.exists(dst):
-                        try:
-                            os.remove(dst)
-                        except:
-                            logger.exception('Can not delete %s', dst)
+                            elif event.mask & delete_mask:
+                                # Delete post.
+                                logger.info('Delete post: %s', os.path.basename(event.pathname))
+                                post = posts.pop(event.pathname, None)
+                                if post:
+                                    dst = os.path.join(site_dir, post.path)
+                                    if os.path.exists(dst):
+                                        try:
+                                            os.remove(dst)
+                                        except:
+                                            logger.exception('Can not delete %s', dst)
+                                    for tag_name in post.tags:
+                                        tag = tags.get(tag_name)
+                                        if tag:
+                                            try:
+                                                tag.posts.remove(post)
+                                            except:
+                                                pass
+                                            if not tag.posts:
+                                                # The tag is empty now. Remove it.
+                                                tags.pop(tag_name, None)
+                                                dst = os.path.join(site_dir, tag.path)
+                                                if os.path.exists(dst):
+                                                    shutil.rmtree(dst, ignore_errors=True)
+                                    if len(posts) % 5 == 0 and len(timeline_archives) > 1:
+                                        # Last timeline archive is empty. Remove it.
+                                        last_timeline_archive = timeline_archives.pop()
+                                        dst = os.path.join(site_dir, last_timeline_archive.path)
+                                        if os.path.exists(dst):
+                                            shutil.rmtree(dst, ignore_errors=True)
 
-    wm = pyinotify.WatchManager()
-    mask = pyinotify.ALL_EVENTS
-    notifier = pyinotify.Notifier(wm)
-    wm.add_watch(published_dir, mask, proc_fun=ResourceChangeHandler(), rec=True, auto_add=True)
-    notifier.loop()
+                                    monthly_archive = monthly_archives.get(datetime.date(post.date.year, post.date.month, 1))
+                                    if monthly_archive:
+                                        try:
+                                            monthly_archive.posts.remove(post)
+                                        except:
+                                            pass
+                                        if not monthly_archive.posts:
+                                            # The month is empty now. Remove it.
+                                            monthly_archives.pop(monthly_archive.month, None)
+                                            dst = os.path.join(site_dir, monthly_archive.path)
+                                            if os.path.exists(dst):
+                                                shutil.rmtree(dst, ignore_errors=True)
+                                            yearly_archive = yearly_archives.get(datetime.date(monthly_archive.month.year, 1, 1))
+                                            if yearly_archive:
+                                                try:
+                                                    yearly_archive.monthly_archives.remove(monthly_archive)
+                                                except:
+                                                    pass
+                                                if not yearly_archive.monthly_archives:
+                                                    # The year is empty now. Remove it.
+                                                    yearly_archives.pop(yearly_archive.year, None)
+                                                    dst = os.path.join(site_dir, yearly_archive.path)
+                                                    if os.path.exists(dst):
+                                                        shutil.rmtree(dst, ignore_errors=True)
+
+                                    create_tags(posts)
+                                    create_timeline_archives(posts)
+                                    create_monthly_archives(posts)
+                                    create_yearly_archives(monthly_archives)
+                                    create_complete_archive(monthly_archives)
+                            return
+                elif path == templates_dir:
+                    # Template changed. Rebuild the whole site.
+                    if event.mask & file_create_mask and os.path.splitext(event.pathname)[1] == '.html':
+                        logger.info('Update template: %s', os.path.basename(event.pathname))
+                        build_site()
+                    return
+                # Map other resource changes into site dir.
+                if site_dir == published_dir:
+                    return
+                if os.path.basename(event.pathname).startswith('.'):
+                    # Ignore hidden/temp files
+                    return
+                rel_path = os.path.relpath(event.pathname, published_dir)
+                dst = os.path.join(site_dir, rel_path)
+                if event.dir:
+                    if event.mask & dir_create_mask:
+                        logger.info('New resource dir: %s', rel_path)
+                        if os.path.exists(dst):
+                            shutil.rmtree(dst, ignore_errors=True)
+                        try:
+                            shutil.copytree(event.pathname, dst)
+                        except Exception as e:
+                            logger.error(e)
+                    elif event.mask & delete_mask:
+                        logger.info('Delete resource dir: %s', rel_path)
+                        if os.path.exists(dst):
+                            shutil.rmtree(dst, ignore_errors=True)
+                else:
+                    if event.mask & file_create_mask:
+                        logger.info('New resource file: %s', rel_path)
+                        try:
+                            shutil.copyfile(event.pathname, dst)
+                        except Exception as e:
+                            logger.error(e)
+                    elif event.mask & delete_mask:
+                        logger.info('Delete resource file: %s', rel_path)
+                        if os.path.exists(dst):
+                            try:
+                                os.remove(dst)
+                            except:
+                                logger.exception('Can not delete %s', dst)
+
+        wm = pyinotify.WatchManager()
+        mask = pyinotify.ALL_EVENTS
+        notifier = pyinotify.Notifier(wm)
+        wm.add_watch(published_dir, mask, proc_fun=ResourceChangeHandler(), rec=True, auto_add=True)
+        notifier.loop()
 
 
 if __name__ == "__main__":
