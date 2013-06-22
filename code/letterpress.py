@@ -117,17 +117,16 @@ class Post(object):
         content = self._format_code_lang(content)
         self.html = format(template, title=self.title, date=self.date.strftime('%Y-%m-%d'), monthly_archive_url=os.path.dirname(self.permalink) + '/', year=self.date.strftime('%Y'), month=self.date.strftime('%B'), day=self.date.strftime('%d'), tags=', '.join('<a href="/tags/{tag}">{tag}</a>'.format(tag=tag) for tag in self.tags), permalink=self.permalink, excerpt=self.excerpt, content=content)
         # Load MathJax for post with math tag.
-        if is_math:
-            self.html = self.html.replace('</head>', '''
+        self.html = self.html.replace('</head>', '''
 <script type="text/x-mathjax-config">
 MathJax.Hub.Config({
-  asciimath2jax: {
-    delimiters: [['%s','%s']]
+  tex2jax: {
+    inlineMath: [['$','$'],['\\(','\\)']]
   }
 });
 </script>
-<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-MML-AM_HTMLorMML"></script>
-</head>''' % (math_delimiter, math_delimiter))
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS_HTML"></script>
+</head>''')
 
     def __str__(self):
         return '{title}({date})'.format(title=self.title, date=self.pretty_date)
